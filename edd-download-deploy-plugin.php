@@ -64,82 +64,79 @@ function handle_deploy_action( $data, $endpoint ) {
 		return $data;
 	}
 
-	if ( empty( $_FILES['file'] ) || ! isset( $_FILES['file']['tmp_name'] ) || UPLOAD_ERR_OK !== $_FILES['file']['error'] ) {
-		$data['error'] = 'No file uploaded';
-
-		return $data;
-	}
-
-	// if version is not empty, we will add the version each file's name and full path if its not already.
+	// handle version.
 	if ( ! empty( $version ) ) {
-		$ext                    = pathinfo( $_FILES['file']['name'], PATHINFO_EXTENSION );
-		$version_string         = '-v' . $version;
-		$_FILES['file']['name'] = str_replace( '.' . $ext, $version_string . '.' . $ext, $_FILES['file']['name'] );
-	}
-
-	delete_transient( 'edd_check_protection_files' );
-	add_filter( 'upload_dir', 'edd_set_upload_dir' );
-
-	// make the file name as WordPress attachment.
-	$file = wp_handle_upload( $_FILES['file'], array( 'test_form' => false ) );
-
-	// if it returns an error, return the error.
-	if ( isset( $file['error'] ) ) {
-		$data['error'] = $file['error'];
-
-		return $data;
-	}
-
-	// attach the file to the download.
-	$attachment_id = wp_insert_attachment(
-		array(
-			'post_title'     => sanitize_title( $file['file'] ),
-			'post_content'   => '',
-			'post_status'    => 'inherit',
-			'post_mime_type' => sanitize_key( $file['type'] ),
-		),
-		$file['file'],
-		$download->ID
-	);
-
-	remove_filter( 'upload_dir', 'edd_set_upload_dir' );
-
-	// If the attachment was not created, return an error.
-	if ( is_wp_error( $attachment_id ) ) {
-		$data['error'] = $attachment_id->get_error_message();
-
-		return $data;
-	}
-
-	// update the version.
-	if ( ! empty( $version ) ) {
+		$version         = preg_replace( '/[^0-9.]/', '', $version );
 		$data['version'] = $version;
 		update_post_meta( $download->ID, '_edd_sl_version', $version );
 	}
 
-	// update the changelog.
+	// handle changelog.
 	if ( ! empty( $changelog ) ) {
 		$data['changelog'] = 'Changelog updated';
 		$changelog         = wp_strip_all_tags( $changelog );
 		update_post_meta( $download->ID, '_edd_sl_changelog', $changelog );
 	}
 
-	// update the attachment ID.
-	if ( ! empty( $attachment_id ) ) {
-		$attachment = wp_get_attachment_url( $attachment_id );
-		$file       = array(
+	// handle file.
+	if ( ! empty( $_FILES['file'] ) && isset( $_FILES['file']['tmp_name'] ) && UPLOAD_ERR_OK === $_FILES['file']['error'] ) {
+		// if version is not empty, we will add the version each file's name and full path if its not already.
+		if ( ! empty( $version ) && isset( $_FILES['file']['name'] ) ) {
+			$ext                    = pathinfo( $_FILES['file']['name'], PATHINFO_EXTENSION );
+			$_FILES['file']['name'] = str_replace( '.' . $ext, '-v' . $version . '.' . $ext, $_FILES['file']['name'] );
+		}
+
+		delete_transient( 'edd_check_protection_files' );
+		add_filter( 'upload_dir', 'edd_set_upload_dir' );
+		// make the file name as WordPress attachment.
+		$file = wp_handle_upload( $_FILES['file'], array( 'test_form' => false ) );
+		if ( ! empty( $file['error'] ) ) {
+			$data['error'] = $file['error'];
+
+			return $data;
+		}
+
+		// attach the file to the download.
+		$attachment_id = wp_insert_attachment(
 			array(
-				'index'          => 0,
-				'attachment_id'  => $attachment_id,
-				'thumbnail_size' => false,
-				'name'           => basename( $attachment ),
-				'file'           => $attachment,
-				'condition'      => 'all',
+				'post_title'     => sanitize_title( $file['file'] ),
+				'post_content'   => '',
+				'post_status'    => 'inherit',
+				'post_mime_type' => sanitize_key( $file['type'] ),
 			),
+			$file['file'],
+			$download->ID
 		);
 
-		$data['file'] = basename( $attachment );
-		update_post_meta( $download->ID, 'edd_download_files', $file );
+		remove_filter( 'upload_dir', 'edd_set_upload_dir' );
+
+		// If the attachment was not created, return an error.
+		if ( is_wp_error( $attachment_id ) ) {
+			$data['error'] = $attachment_id->get_error_message();
+
+			return $data;
+		}
+
+		// update the attachment ID.
+		if ( ! empty( $attachment_id ) ) {
+			$attachment = wp_get_attachment_url( $attachment_id );
+			$file       = array(
+				array(
+					'index'          => 0,
+					'attachment_id'  => $attachment_id,
+					'thumbnail_size' => false,
+					'name'           => basename( $attachment ),
+					'file'           => $attachment,
+					'condition'      => 'all',
+				),
+			);
+
+			$data['file'] = basename( $attachment );
+			update_post_meta( $download->ID, 'edd_download_files', $file );
+
+			// update edd_sl_upgrade_file.
+			update_post_meta( $download->ID, '_edd_sl_upgrade_file_key', 0 );
+		}
 	}
 
 	// reset cache.
